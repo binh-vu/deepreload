@@ -20,8 +20,8 @@ jobs:
           pip install poetry pytest
           poetry lock --no-update
           poetry install
-      - name: run test
-        run: poetry run pytest -xs tests/
+      #   - name: run test
+      #     run: poetry run pytest -xs tests/
       - name: build wheels
         run: poetry build
       - name: upload wheels

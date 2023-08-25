@@ -218,7 +218,7 @@ def custom_import(
 
 
 modules_reloading = {}
-RELOAD_PACKAGE: str = ""
+RELOAD_PACKAGE: list[str] = []
 # Need to keep track of what we've already reloaded to prevent cyclic evil
 found_now = {}
 
@@ -228,12 +228,12 @@ def import_submodule(mod: ModuleType, subname: str, fullname: str):
     # Require:
     # if mod == None: subname == fullname
     # else: mod.__name__ + "." + subname == fullname
-    global RELOAD_PACKAGE, found_now
+    global found_now
 
     if fullname in found_now and fullname in sys.modules:
         return sys.modules[fullname]
 
-    if not fullname.startswith(RELOAD_PACKAGE):
+    if not does_it_need_reload(fullname):
         if fullname not in sys.modules:
             m = importlib.import_module(subname, mod)
             found_now[fullname] = 1
@@ -305,15 +305,59 @@ def reload(
         "numpy",
         "numpy._globals",
     ),
+    allow_reload: Optional[str] | list[str] = None,
 ) -> ModuleType:
+    """Reload a package and all dependencies it has imported.
+
+    # Arguments
+        pkg: The package to reload.
+        exclude: A list of modules to exclude from reloading.
+        allow_reload: A list of modules / or single module to allow reloading.
+            If None, it will be the package itself. To allow reloading everything,
+            use empty string
+
+    # Returns
+        The reloaded package.
+
+    # Common mistakes:
+
+    ```python
+    deepreload.reload('sm')
+    ```
+
+    It will try to reload `sm.__init__`. As `sm.__init__` does not import
+    anything, nothing will be reloaded (including the whole package `sm`)
+
+    ```python
+    deepreload.reload('sm.prelude')
+    ```
+
+    The module `sm.prelude` imports other dependencies from `sm.*` sub-packages.
+    Since `allow_reload` default is the package itself, `sm.*` sub-packages do not
+    match and nothing will be reloaded. To make it work, use `deepreload.reload('sm.prelude', allow_reload='sm')`
+    """
+    if pkg not in sys.modules:
+        raise ImportError(f"Module {pkg} is not imported yet.")
+
     global found_now, RELOAD_PACKAGE
     for i in exclude:
         found_now[i] = 1
 
-    RELOAD_PACKAGE = pkg
+    if allow_reload is None:
+        RELOAD_PACKAGE = [pkg]
+    elif isinstance(allow_reload, str):
+        RELOAD_PACKAGE = [allow_reload]
+    else:
+        RELOAD_PACKAGE = allow_reload
 
     try:
         with replace_import_hook(custom_import):
             return custom_reload(sys.modules[pkg])
     finally:
         found_now = {}
+
+
+def does_it_need_reload(fullname: str):
+    global RELOAD_PACKAGE
+
+    return any(fullname.startswith(x) for x in RELOAD_PACKAGE)

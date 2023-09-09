@@ -217,8 +217,17 @@ def custom_import(
     return tail
 
 
-modules_reloading = {}
 RELOAD_PACKAGE: list[str] = []
+EXACT_EXCLUDE_PACKAGE: tuple[str, ...] = (
+    *sys.builtin_module_names,
+    "sys",
+    "os.path",
+    "builtins",
+    "__main__",
+)
+PREFIX_EXCLUDE_PACKAGE: tuple[str, ...] = ("numpy", "pandas")
+VERBOSE: bool = True
+modules_reloading = {}
 # Need to keep track of what we've already reloaded to prevent cyclic evil
 found_now = {}
 
@@ -228,7 +237,7 @@ def import_submodule(mod: ModuleType, subname: str, fullname: str):
     # Require:
     # if mod == None: subname == fullname
     # else: mod.__name__ + "." + subname == fullname
-    global found_now
+    global found_now, VERBOSE
 
     if fullname in found_now and fullname in sys.modules:
         return sys.modules[fullname]
@@ -243,7 +252,8 @@ def import_submodule(mod: ModuleType, subname: str, fullname: str):
 
         return m
 
-    print("Reloading", fullname)
+    if VERBOSE:
+        print("Reloading", fullname)
     found_now[fullname] = 1
     oldm = sys.modules.get(fullname, None)
     try:
@@ -296,16 +306,10 @@ def custom_reload(m: ModuleType):
 
 def reload(
     pkg: str,
-    exclude=(
-        *sys.builtin_module_names,
-        "sys",
-        "os.path",
-        "builtins",
-        "__main__",
-        "numpy",
-        "numpy._globals",
-    ),
     allow_reload: Optional[str] | list[str] = None,
+    exact_exclude: tuple[str, ...] = EXACT_EXCLUDE_PACKAGE,
+    prefix_exclude: tuple[str, ...] = PREFIX_EXCLUDE_PACKAGE,
+    verbose: bool = True,
 ) -> ModuleType:
     """Reload a package and all dependencies it has imported.
 
@@ -339,9 +343,12 @@ def reload(
     if pkg not in sys.modules:
         raise ImportError(f"Module {pkg} is not imported yet.")
 
-    global found_now, RELOAD_PACKAGE
-    for i in exclude:
+    global found_now, RELOAD_PACKAGE, PREFIX_EXCLUDE_PACKAGE, VERBOSE
+    for i in exact_exclude:
         found_now[i] = 1
+
+    VERBOSE = verbose
+    PREFIX_EXCLUDE_PACKAGE = prefix_exclude
 
     if allow_reload is None:
         RELOAD_PACKAGE = [pkg]
@@ -358,6 +365,10 @@ def reload(
 
 
 def does_it_need_reload(fullname: str):
-    global RELOAD_PACKAGE
+    global RELOAD_PACKAGE, PREFIX_EXCLUDE_PACKAGE
 
-    return any(fullname.startswith(x) for x in RELOAD_PACKAGE)
+    return any(
+        fullname == x or fullname.startswith(x + ".") for x in RELOAD_PACKAGE
+    ) and not any(
+        fullname == x or fullname.startswith(x + ".") for x in PREFIX_EXCLUDE_PACKAGE
+    )
